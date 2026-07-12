@@ -24,3 +24,7 @@ build_failed_source.cl
 
 # Found keys (IMPORTANT: do not leak private keys to GitHub!)
 found.txt
+
+# Local documentation (removed from GitHub but kept locally)
+CHANGELOG.md
+PORTING-LAYOUT.md
