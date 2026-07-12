@@ -1,0 +1,26 @@
+# Build directories and binaries
+build/
+bin/
+lib/
+out/
+
+# Visual Studio files
+.vs/
+*.user
+*.suo
+*.sln
+*.vcxproj
+*.filters
+
+# CLion/JetBrains files
+.idea/
+cmake-build-debug/
+cmake-build-release/
+
+# Temporary / Log files
+*.log
+test_output.log
+build_failed_source.cl
+
+# Found keys (IMPORTANT: do not leak private keys to GitHub!)
+found.txt
