@@ -198,7 +198,7 @@ void run_on_gpu_opencl(
        - -DOPENCL_RDNA1=1: ativa código específico RDNA1 (wave32).
        NOTA: -Werror foi removido — drivers AMD têm warnings benignos que
        impediriam a compilação na primeira tentativa. */
-    std::string build_opts = "-cl-std=CL2.0 -cl-mad-enable -DOPENCL_RDNA1=1"
+    std::string build_opts = "-cl-std=CL2.0 -cl-mad-enable -cl-fast-relaxed-math -O3 -DOPENCL_RDNA1=1"
                            + std::string(" -DMAX_BATCH_SIZE=") + std::to_string(B)
                            + std::string(" -DBATCH_SIZE_CONST=") + std::to_string(B)
                            + std::string(" -DHALF_B_CONST=") + std::to_string(half);
