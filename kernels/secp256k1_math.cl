@@ -767,6 +767,234 @@ __forceinline__ void mod_inv_fermat(ulong R[5]) {
 }
 
 /* ───────────────────────────────────────────────────────────────────────
+ * _ModInvBY (Bernstein-Yang): R = R^-1 mod p
+ *
+ * Versão adaptada sem dependência de __uint128_t.
+ * ─────────────────────────────────────────────────────────────────────── */
+__forceinline__ void mod_inv_bernstein_yang(ulong R[5]) {
+    if ((R[0]|R[1]|R[2]|R[3])==0UL) return;
+
+    // Even inputs: inv(a) = P - inv(P-a). P-a is odd, so BY applies.
+    bool was_even = false;
+    if ((R[0] & 1UL) == 0UL) {
+        was_even = true;
+        ulong carry = 0;
+        ulong n0, n1, n2, n3;
+        USUBO(n0, SECP256K1_P0, R[0]);
+        USUBC(n1, SECP256K1_P1, R[1]);
+        USUBC(n2, SECP256K1_P2, R[2]);
+        USUBC(n3, SECP256K1_P3, R[3]);
+        R[0]=n0; R[1]=n1; R[2]=n2; R[3]=n3; R[4]=0UL;
+    }
+
+    ulong a_work[4] = {R[0],R[1],R[2],R[3]};
+
+    // ── State (5-limb signed) ──
+    ulong f[5] = {R[0],R[1],R[2],R[3],0UL};
+    ulong g[5] = {SECP256K1_P0, SECP256K1_P1, SECP256K1_P2, SECP256K1_P3, 0UL};
+    ulong u[5] = {1UL, 0UL, 0UL, 0UL, 0UL};
+    ulong v[5] = {0UL, 0UL, 0UL, 0UL, 0UL};
+    ulong qv[5] = {0UL, 0UL, 0UL, 0UL, 0UL};
+    ulong r[5] = {1UL, 0UL, 0UL, 0UL, 0UL};
+
+    int delta = 1;
+
+    for (int step = 0; step < 2000; step++) {
+        // Check termination: g==0 or f==±1
+        ulong gz = g[0]|g[1]|g[2]|g[3]|g[4];
+        ulong f1 = (f[0]==1UL && (f[1]|f[2]|f[3]|f[4])==0UL) ? 1UL : 0UL;
+        ulong fm1 = ((f[0] & f[1] & f[2] & f[3] & f[4]) == 0xFFFFFFFFFFFFFFFFUL) ? 1UL : 0UL;
+        if (gz==0UL || f1 || fm1) break;
+
+        ulong carry;
+
+        if ((g[0] & 1UL) == 0UL) {
+            // ── g even ──
+            // g >>= 1
+            g[0] = (g[0]>>1UL) | (g[1]<<63UL);
+            g[1] = (g[1]>>1UL) | (g[2]<<63UL);
+            g[2] = (g[2]>>1UL) | (g[3]<<63UL);
+            g[3] = (g[3]>>1UL) | (g[4]<<63UL);
+            g[4] = (ulong)(((long)g[4]) >> 1);
+
+            if (qv[0] & 1UL) {
+                // q = (q + P) >> 1
+                UADDO1(qv[0], SECP256K1_P0); UADDC1(qv[1], SECP256K1_P1);
+                UADDC1(qv[2], SECP256K1_P2); UADDC1(qv[3], SECP256K1_P3); UADD1(qv[4], 0UL);
+                qv[0] = (qv[0]>>1UL) | (qv[1]<<63UL);
+                qv[1] = (qv[1]>>1UL) | (qv[2]<<63UL);
+                qv[2] = (qv[2]>>1UL) | (qv[3]<<63UL);
+                qv[3] = (qv[3]>>1UL) | (qv[4]<<63UL);
+                qv[4] = (ulong)(((long)qv[4]) >> 1);
+                // r = (r - a) >> 1
+                USUBO1(r[0], a_work[0]); USUBC1(r[1], a_work[1]);
+                USUBC1(r[2], a_work[2]); USUBC1(r[3], a_work[3]); USUB1(r[4], 0UL);
+                r[0] = (r[0]>>1UL) | (r[1]<<63UL);
+                r[1] = (r[1]>>1UL) | (r[2]<<63UL);
+                r[2] = (r[2]>>1UL) | (r[3]<<63UL);
+                r[3] = (r[3]>>1UL) | (r[4]<<63UL);
+                r[4] = (ulong)(((long)r[4]) >> 1);
+            } else {
+                qv[0] = (qv[0]>>1UL) | (qv[1]<<63UL);
+                qv[1] = (qv[1]>>1UL) | (qv[2]<<63UL);
+                qv[2] = (qv[2]>>1UL) | (qv[3]<<63UL);
+                qv[3] = (qv[3]>>1UL) | (qv[4]<<63UL);
+                qv[4] = (ulong)(((long)qv[4]) >> 1);
+                r[0] = (r[0]>>1UL) | (r[1]<<63UL);
+                r[1] = (r[1]>>1UL) | (r[2]<<63UL);
+                r[2] = (r[2]>>1UL) | (r[3]<<63UL);
+                r[3] = (r[3]>>1UL) | (r[4]<<63UL);
+                r[4] = (ulong)(((long)r[4]) >> 1);
+            }
+            delta++;
+        } else if (delta > 0) {
+            // ── swap ──
+            ulong tf[5], tu[5], tv[5];
+            #pragma unroll
+            for (int k=0; k<5; ++k) { tf[k]=f[k]; tu[k]=u[k]; tv[k]=v[k]; }
+            #pragma unroll
+            for (int k=0; k<5; ++k) { f[k]=g[k]; u[k]=qv[k]; v[k]=r[k]; }
+            // new_g = (old_g - old_f) / 2
+            USUBO(g[0], g[0], tf[0]); USUBC(g[1], g[1], tf[1]);
+            USUBC(g[2], g[2], tf[2]); USUBC(g[3], g[3], tf[3]);
+            USUBC(g[4], g[4], tf[4]);
+            g[0]=(g[0]>>1UL)|(g[1]<<63UL);g[1]=(g[1]>>1UL)|(g[2]<<63UL);
+            g[2]=(g[2]>>1UL)|(g[3]<<63UL);g[3]=(g[3]>>1UL)|(g[4]<<63UL);
+            g[4]=(ulong)(((long)g[4])>>1);
+            // new_q = (old_q - old_u) / 2
+            USUBO(qv[0], qv[0], tu[0]); USUBC(qv[1], qv[1], tu[1]);
+            USUBC(qv[2], qv[2], tu[2]); USUBC(qv[3], qv[3], tu[3]);
+            USUBC(qv[4], qv[4], tu[4]);
+            // new_r = (old_r - old_v) / 2
+            USUBO(r[0], r[0], tv[0]); USUBC(r[1], r[1], tv[1]);
+            USUBC(r[2], r[2], tv[2]); USUBC(r[3], r[3], tv[3]);
+            USUBC(r[4], r[4], tv[4]);
+            if (qv[0] & 1UL) {
+                carry=0; UADDO1(qv[0], SECP256K1_P0); UADDC1(qv[1], SECP256K1_P1);
+                UADDC1(qv[2], SECP256K1_P2); UADDC1(qv[3], SECP256K1_P3); UADD1(qv[4], 0UL);
+                qv[0]=(qv[0]>>1UL)|(qv[1]<<63UL);qv[1]=(qv[1]>>1UL)|(qv[2]<<63UL);
+                qv[2]=(qv[2]>>1UL)|(qv[3]<<63UL);qv[3]=(qv[3]>>1UL)|(qv[4]<<63UL);
+                qv[4]=(ulong)(((long)qv[4])>>1);
+                carry=0; USUBO1(r[0], a_work[0]); USUBC1(r[1], a_work[1]);
+                USUBC1(r[2], a_work[2]); USUBC1(r[3], a_work[3]); USUB1(r[4], 0UL);
+                r[0]=(r[0]>>1UL)|(r[1]<<63UL);r[1]=(r[1]>>1UL)|(r[2]<<63UL);
+                r[2]=(r[2]>>1UL)|(r[3]<<63UL);r[3]=(r[3]>>1UL)|(r[4]<<63UL);
+                r[4]=(ulong)(((long)r[4])>>1);
+            } else {
+                qv[0]=(qv[0]>>1UL)|(qv[1]<<63UL);qv[1]=(qv[1]>>1UL)|(qv[2]<<63UL);
+                qv[2]=(qv[2]>>1UL)|(qv[3]<<63UL);qv[3]=(qv[3]>>1UL)|(qv[4]<<63UL);
+                qv[4]=(ulong)(((long)qv[4])>>1);
+                r[0]=(r[0]>>1UL)|(r[1]<<63UL);r[1]=(r[1]>>1UL)|(r[2]<<63UL);
+                r[2]=(r[2]>>1UL)|(r[3]<<63UL);r[3]=(r[3]>>1UL)|(r[4]<<63UL);
+                r[4]=(ulong)(((long)r[4])>>1);
+            }
+            delta = 1 - delta;
+        } else {
+            // ── no-swap ──
+            UADDO(g[0], g[0], f[0]); UADDC(g[1], g[1], f[1]);
+            UADDC(g[2], g[2], f[2]); UADDC(g[3], g[3], f[3]);
+            UADDC(g[4], g[4], f[4]);
+            g[0]=(g[0]>>1UL)|(g[1]<<63UL);g[1]=(g[1]>>1UL)|(g[2]<<63UL);
+            g[2]=(g[2]>>1UL)|(g[3]<<63UL);g[3]=(g[3]>>1UL)|(g[4]<<63UL);
+            g[4]=(ulong)(((long)g[4])>>1);
+            UADDO(qv[0], qv[0], u[0]); UADDC(qv[1], qv[1], u[1]);
+            UADDC(qv[2], qv[2], u[2]); UADDC(qv[3], qv[3], u[3]);
+            UADDC(qv[4], qv[4], u[4]);
+            UADDO(r[0], r[0], v[0]); UADDC(r[1], r[1], v[1]);
+            UADDC(r[2], r[2], v[2]); UADDC(r[3], r[3], v[3]);
+            UADDC(r[4], r[4], v[4]);
+            if (qv[0] & 1UL) {
+                carry=0; UADDO1(qv[0], SECP256K1_P0); UADDC1(qv[1], SECP256K1_P1);
+                UADDC1(qv[2], SECP256K1_P2); UADDC1(qv[3], SECP256K1_P3); UADD1(qv[4], 0UL);
+                qv[0]=(qv[0]>>1UL)|(qv[1]<<63UL);qv[1]=(qv[1]>>1UL)|(qv[2]<<63UL);
+                qv[2]=(qv[2]>>1UL)|(qv[3]<<63UL);qv[3]=(qv[3]>>1UL)|(qv[4]<<63UL);
+                qv[4]=(ulong)(((long)qv[4])>>1);
+                carry=0; USUBO1(r[0], a_work[0]); USUBC1(r[1], a_work[1]);
+                USUBC1(r[2], a_work[2]); USUBC1(r[3], a_work[3]); USUB1(r[4], 0UL);
+                r[0]=(r[0]>>1UL)|(r[1]<<63UL);r[1]=(r[1]>>1UL)|(r[2]<<63UL);
+                r[2]=(r[2]>>1UL)|(r[3]<<63UL);r[3]=(r[3]>>1UL)|(r[4]<<63UL);
+                r[4]=(ulong)(((long)r[4])>>1);
+            } else {
+                qv[0]=(qv[0]>>1UL)|(qv[1]<<63UL);qv[1]=(qv[1]>>1UL)|(qv[2]<<63UL);
+                qv[2]=(qv[2]>>1UL)|(qv[3]<<63UL);qv[3]=(qv[3]>>1UL)|(qv[4]<<63UL);
+                qv[4]=(ulong)(((long)qv[4])>>1);
+                r[0]=(r[0]>>1UL)|(r[1]<<63UL);r[1]=(r[1]>>1UL)|(r[2]<<63UL);
+                r[2]=(r[2]>>1UL)|(r[3]<<63UL);r[3]=(r[3]>>1UL)|(r[4]<<63UL);
+                r[4]=(ulong)(((long)r[4])>>1);
+            }
+            delta++;
+        }
+    }
+
+    // ── Extract inverse ──
+    ulong inv[5];
+    ulong f_is_one = (f[0]==1UL && (f[1]|f[2]|f[3]|f[4])==0UL) ? 1UL : 0UL;
+    ulong f_is_mone = ((f[0] & f[1] & f[2] & f[3] & f[4]) == 0xFFFFFFFFFFFFFFFFUL) ? 1UL : 0UL;
+    ulong g_is_one = (g[0]==1UL && (g[1]|g[2]|g[3]|g[4])==0UL) ? 1UL : 0UL;
+
+    if (f_is_one) {
+        #pragma unroll
+        for (int k=0; k<5; ++k) inv[k]=u[k];
+    } else if (f_is_mone) {
+        ulong carry;
+        USUBO(inv[0],0UL,u[0]);USUBC(inv[1],0UL,u[1]);
+        USUBC(inv[2],0UL,u[2]);USUBC(inv[3],0UL,u[3]);USUB(inv[4],0UL,u[4]);
+    } else if (g_is_one) {
+        #pragma unroll
+        for (int k=0; k<5; ++k) inv[k]=qv[k];
+    } else {
+        ulong carry;
+        USUBO(inv[0],0UL,qv[0]);USUBC(inv[1],0UL,qv[1]);
+        USUBC(inv[2],0UL,qv[2]);USUBC(inv[3],0UL,qv[3]);USUB(inv[4],0UL,qv[4]);
+    }
+
+    // Reduce 5-limb inverse to 4-limb (mod P)
+    long sinv4 = (long)inv[4];
+    if (sinv4 >= 0) {
+        ulong p_val = (ulong)sinv4 * SECP256K1_C256;
+        ulong carry = 0;
+        UADDO(R[0], inv[0], p_val);
+        UADDC(R[1], inv[1], 0UL);
+        UADDC(R[2], inv[2], 0UL);
+        UADD (R[3], inv[3], 0UL);
+    } else {
+        ulong absv = (ulong)(-sinv4);
+        ulong p_val = absv * SECP256K1_C256;
+        ulong carry = 0;
+        USUBO(R[0], inv[0], p_val);
+        USUBC(R[1], inv[1], 0UL);
+        USUBC(R[2], inv[2], 0UL);
+        USUB (R[3], inv[3], 0UL);
+    }
+
+    // Subtract P if >= P
+    ulong t[4];
+    ulong carry = 0;
+    USUBO(t[0], R[0], SECP256K1_P0);
+    USUBC(t[1], R[1], SECP256K1_P1);
+    USUBC(t[2], R[2], SECP256K1_P2);
+    USUBC(t[3], R[3], SECP256K1_P3);
+    ulong borrow = carry;
+    if (borrow==0UL) {
+        #pragma unroll
+        for (int k=0; k<4; ++k) R[k]=t[k];
+    }
+
+    // If input was even, final: inv(a) = P - inv(P-a).
+    if (was_even) {
+        ulong carry = 0;
+        ulong n0, n1, n2, n3;
+        USUBO(n0, SECP256K1_P0, R[0]);
+        USUBC(n1, SECP256K1_P1, R[1]);
+        USUBC(n2, SECP256K1_P2, R[2]);
+        USUBC(n3, SECP256K1_P3, R[3]);
+        R[0]=n0; R[1]=n1; R[2]=n2; R[3]=n3;
+    }
+
+    R[4] = 0UL;
+}
+
+/* ───────────────────────────────────────────────────────────────────────
  * Helpers para conversão 4×64 ↔ 5×62 (Bernstein-Yang)
  * ─────────────────────────────────────────────────────────────────────── */
 __forceinline__ void to62(const ulong src[4], ulong dst[5]) {
@@ -874,7 +1102,7 @@ __forceinline__ void fieldSqr(const __generic ulong *a, __generic ulong *out) {
 __forceinline__ void fieldInv(const __generic ulong *in, __generic ulong *out) {
     ulong t[5];
     t[0]=in[0]; t[1]=in[1]; t[2]=in[2]; t[3]=in[3]; t[4]=0UL;
-    mod_inv_fermat(t);
+    mod_inv_bernstein_yang(t);
     out[0]=t[0]; out[1]=t[1]; out[2]=t[2]; out[3]=t[3];
 }
 

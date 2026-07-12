@@ -365,7 +365,7 @@ void kernel_point_add_and_check_oneinv(
         for (int j=0; j<4; ++j) inverse[j] = d0[j];
         mod_mult(inverse, inverse, subp[0]);
         inverse[4] = 0UL;
-        mod_inv_fermat(inverse);
+        mod_inv_bernstein_yang(inverse);
 
         ulong sy_neg[4], sx_neg[4];
         mod_neg256(y1, sy_neg);
